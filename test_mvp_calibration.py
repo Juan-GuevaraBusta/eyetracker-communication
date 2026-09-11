@@ -43,5 +43,27 @@ class TestSampleFallback(unittest.TestCase):
         np.testing.assert_allclose(result, samples[0])
 
 
+class TestBlinkFrame(unittest.TestCase):
+    def test_marco_negro_solo_mientras_dura_el_parpadeo(self):
+        from main import blink_frame_active
+
+        self.assertFalse(blink_frame_active(now=1.0, last_blink_at=None))
+        self.assertTrue(blink_frame_active(now=1.0, last_blink_at=1.0, hold_s=0.3))
+        self.assertTrue(blink_frame_active(now=1.2, last_blink_at=1.0, hold_s=0.3))
+        self.assertFalse(blink_frame_active(now=1.4, last_blink_at=1.0, hold_s=0.3))
+
+    def test_dibuja_negro_alrededor_y_deja_el_centro(self):
+        from main import draw_blink_frame
+
+        canvas = np.full((200, 300, 3), 255, dtype=np.uint8)
+        draw_blink_frame(canvas, margin=20)
+        # Esquinas / borde: negro
+        self.assertTrue(np.array_equal(canvas[5, 5], (0, 0, 0)))
+        self.assertTrue(np.array_equal(canvas[5, 150], (0, 0, 0)))
+        self.assertTrue(np.array_equal(canvas[100, 5], (0, 0, 0)))
+        # Centro de la grilla: sigue blanco
+        self.assertTrue(np.array_equal(canvas[100, 150], (255, 255, 255)))
+
+
 if __name__ == "__main__":
     unittest.main()

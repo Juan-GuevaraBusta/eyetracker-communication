@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 
 import calibration as calib
-from gaze import GazeTracker
+from gaze import GazeTracker, detect_blink
 
 # ---------------------------------------------------------------------------
 # Constantes de la interfaz
@@ -38,6 +38,10 @@ STABILITY_WINDOW = 10                # últimas N predicciones (sección 11)
 SMOOTHING_ALPHA = 0.35               # suavizado exponencial del punto de mirada
 
 PREVIEW_W, PREVIEW_H = 220, 165      # miniatura de la cámara en pantalla
+
+# Marco negro alrededor de la grilla al parpadear (no cambia el gaze).
+BLINK_FRAME_HOLD_S = 0.35
+BLINK_FRAME_MARGIN = 56
 
 # Estados de la máquina de estados
 STATE_INSTRUCTIONS = "instructions"
@@ -126,6 +130,26 @@ def draw_highlight(canvas, cell_idx, w, h):
     cv2.rectangle(overlay, (x0, y0), (x1, y1), HIGHLIGHT_COLOR, -1)
     cv2.addWeighted(overlay, HIGHLIGHT_ALPHA, canvas, 1 - HIGHLIGHT_ALPHA, 0, dst=canvas)
     cv2.rectangle(canvas, (x0, y0), (x1, y1), HIGHLIGHT_COLOR, GRID_LINE_THICKNESS)
+
+
+def blink_frame_active(now, last_blink_at, hold_s=BLINK_FRAME_HOLD_S):
+    """True si debe mostrarse el marco negro (parpadeo o hold breve)."""
+    if last_blink_at is None:
+        return False
+    return (now - last_blink_at) <= hold_s
+
+
+def draw_blink_frame(canvas, margin=BLINK_FRAME_MARGIN):
+    """Pinta un marco negro alrededor de la grilla; el interior no se toca."""
+    h, w = canvas.shape[:2]
+    m = int(margin)
+    if m <= 0:
+        return
+    black = (0, 0, 0)
+    cv2.rectangle(canvas, (0, 0), (w - 1, m), black, -1)
+    cv2.rectangle(canvas, (0, h - m), (w - 1, h - 1), black, -1)
+    cv2.rectangle(canvas, (0, 0), (m, h - 1), black, -1)
+    cv2.rectangle(canvas, (w - m, 0), (w - 1, h - 1), black, -1)
 
 
 def draw_text_block(canvas, lines, org=(30, 40), scale=0.8, color=(0, 0, 0),
@@ -471,6 +495,7 @@ class EyeTrackerApp:
 
     # -- estado: seguimiento (modo normal) -----------------------------------
     def _state_tracking(self):
+        last_blink_at = None
         while True:
             data = self._read()
             if data is None:
@@ -482,6 +507,18 @@ class EyeTrackerApp:
             estado_txt = "Buscando rostro..."
             cuadro_txt = "-"
             gaze_txt = "(-, -)"
+
+            # Señal visual de parpadeo, independiente de si se rechazan
+            # frames para el gaze. La predicción de mirada no se toca.
+            eyes_closed = detect_blink(
+                data.get("blink_score_a", 0.0),
+                data.get("blink_score_b", 0.0),
+                enabled=True,
+            )
+            now = time.time()
+            if eyes_closed:
+                last_blink_at = now
+            show_blink_frame = blink_frame_active(now, last_blink_at)
 
             use_feature = data["face_found"] and data["feature"] is not None
             # Solo se congela el cuadro si AMBOS ojos superan el umbral
@@ -535,6 +572,10 @@ class EyeTrackerApp:
                 estado_txt = "Rostro detectado, landmarks incompletos"
             else:
                 estado_txt = "No se detecta el rostro"
+
+            if show_blink_frame:
+                draw_blink_frame(canvas)
+                estado_txt = "Parpadeo detectado"
 
             hud_lines = [
                 f"Gaze: {gaze_txt}",
