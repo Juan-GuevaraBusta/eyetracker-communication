@@ -1,0 +1,17 @@
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Modelo de MediaPipe descargado automáticamente (pesa ~3.7 MB, se descarga solo)
+models/*.task
+
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Datos de calibración guardados por el usuario
+calibration_data.json
+
+# Sistema
+.DS_Store
