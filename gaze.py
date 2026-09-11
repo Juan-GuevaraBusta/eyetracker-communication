@@ -142,12 +142,10 @@ NUM_LANDMARKS_WITH_IRIS = 478
 BLINK_CATEGORY_A = "eyeBlinkRight"
 BLINK_CATEGORY_B = "eyeBlinkLeft"
 
-# Rechazo de parpadeos (MVP): por defecto exige AMBOS ojos por encima del
-# umbral. Un solo ojo ruidoso no debe descartar el frame. Sube el umbral
-# respecto a 0.5 para reducir falsos positivos con webcams baratas.
-# Pon ENABLE_BLINK_REJECTION = False si sigue bloqueando la calibración.
+# Umbral bajo para marcar casilla al parpadear de forma rápida.
+# Sigue exigiendo AMBOS ojos > 0.25 (un solo ojo ruidoso no basta).
 ENABLE_BLINK_REJECTION = True
-BLINK_THRESHOLD = 0.75
+BLINK_THRESHOLD = 0.25
 BLINK_REQUIRE_BOTH_EYES = True
 
 # Si False, yaw/pitch se mandan en 0 y no influyen en el mapper.

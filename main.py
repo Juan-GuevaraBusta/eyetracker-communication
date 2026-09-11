@@ -31,8 +31,21 @@ WINDOW_NAME = "Eye Tracker 3x3"
 
 GRID_LINE_THICKNESS = 6
 GRID_LINE_COLOR = (0, 0, 0)          # negro, sección 2 y 4 del prompt
-HIGHLIGHT_COLOR = (60, 180, 60)      # verde, resaltado del cuadro detectado
-HIGHLIGHT_ALPHA = 0.35
+SELECTED_FILL_COLOR = (220, 90, 0)   # azul BGR: cuadro elegido al parpadear
+
+# Frases de la grilla, fila por fila (celdas 1-9).
+CELL_LABELS = {
+    1: "tengo hambre",
+    2: "dejenme solo",
+    3: "tengo sed",
+    4: "si",
+    5: "como estas",
+    6: "no",
+    7: "arriba",
+    8: "me duele",
+    9: "abajo",
+}
+CELL_LABEL_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 STABILITY_WINDOW = 10                # últimas N predicciones (sección 11)
 SMOOTHING_ALPHA = 0.35               # suavizado exponencial del punto de mirada
@@ -124,12 +137,82 @@ def compute_cell(x, y, w, h):
     return row * 3 + col + 1
 
 
-def draw_highlight(canvas, cell_idx, w, h):
+def next_selected_cell(selected, gazed, blink_now, blink_prev):
+    """El relleno azul solo cambia en el flanco de subida del parpadeo."""
+    if gazed is None:
+        return selected
+    if blink_now and not blink_prev:
+        return gazed
+    return selected
+
+
+def gaze_cell_for_blink_mark(last_open, instant, eyes_closed):
+    """
+    Al parpadear el iris se deforma y la predicción de ESE frame miente.
+    Se marca la última casilla con ojos abiertos (donde iba el punto).
+    """
+    if eyes_closed:
+        return last_open
+    return instant
+
+
+def draw_selected_cell(canvas, cell_idx, w, h):
+    """Rellena de azul el cuadro elegido (uno a la vez)."""
+    if cell_idx is None:
+        return
     x0, y0, x1, y1 = cell_bounds(cell_idx, w, h)
-    overlay = canvas.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), HIGHLIGHT_COLOR, -1)
-    cv2.addWeighted(overlay, HIGHLIGHT_ALPHA, canvas, 1 - HIGHLIGHT_ALPHA, 0, dst=canvas)
-    cv2.rectangle(canvas, (x0, y0), (x1, y1), HIGHLIGHT_COLOR, GRID_LINE_THICKNESS)
+    cv2.rectangle(canvas, (x0, y0), (x1, y1), SELECTED_FILL_COLOR, -1)
+    cv2.rectangle(canvas, (x0, y0), (x1, y1), GRID_LINE_COLOR, GRID_LINE_THICKNESS)
+
+
+def label_layout_for_cell(text, cell_w, cell_h):
+    """
+    Parte la frase en líneas (una palabra por línea si hay varias) y
+    elige la escala más grande que cabe en ~86% del ancho y ~62% del alto.
+    """
+    lines = text.split() if " " in text else [text]
+    max_w = cell_w * 0.86
+    max_h = cell_h * 0.62
+    scale = 4.0
+    thickness = 6
+    while scale >= 0.4:
+        thickness = max(2, int(round(scale * 2.6)))
+        widths, heights = [], []
+        for line in lines:
+            (tw, th), _ = cv2.getTextSize(line, CELL_LABEL_FONT, scale, thickness)
+            widths.append(tw)
+            heights.append(th)
+        gap = int(max(8, scale * 16))
+        total_h = sum(heights) + gap * (len(lines) - 1)
+        if max(widths) <= max_w and total_h <= max_h:
+            return lines, float(scale), int(thickness)
+        scale -= 0.06
+    thickness = max(2, int(round(scale * 2.6)))
+    return lines, float(max(scale, 0.4)), int(thickness)
+
+
+def draw_cell_labels(canvas, w, h, selected_cell=None):
+    """Dibuja las frases centradas en cada casilla, encima del relleno azul."""
+    for idx, text in CELL_LABELS.items():
+        x0, y0, x1, y1 = cell_bounds(idx, w, h)
+        cw, ch = x1 - x0, y1 - y0
+        lines, scale, thickness = label_layout_for_cell(text, cw, ch)
+        sizes = [cv2.getTextSize(line, CELL_LABEL_FONT, scale, thickness)[0] for line in lines]
+        gap = int(max(8, scale * 16))
+        total_h = sum(s[1] for s in sizes) + gap * (len(lines) - 1)
+        color = (255, 255, 255) if idx == selected_cell else (20, 20, 20)
+        outline = (0, 0, 0) if idx == selected_cell else (255, 255, 255)
+        y = y0 + (ch - total_h) // 2 + sizes[0][1]
+        cx = (x0 + x1) // 2
+        for line, (tw, th) in zip(lines, sizes):
+            x = cx - tw // 2
+            outline_th = thickness + 3
+            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+                cv2.putText(canvas, line, (x + dx, y + dy), CELL_LABEL_FONT,
+                            scale, outline, outline_th, cv2.LINE_AA)
+            cv2.putText(canvas, line, (x, y), CELL_LABEL_FONT,
+                        scale, color, thickness, cv2.LINE_AA)
+            y += th + gap
 
 
 def blink_frame_active(now, last_blink_at, hold_s=BLINK_FRAME_HOLD_S):
@@ -496,6 +579,9 @@ class EyeTrackerApp:
     # -- estado: seguimiento (modo normal) -----------------------------------
     def _state_tracking(self):
         last_blink_at = None
+        was_closed = False
+        selected_cell = None
+        last_open_cell = None
         while True:
             data = self._read()
             if data is None:
@@ -507,6 +593,7 @@ class EyeTrackerApp:
             estado_txt = "Buscando rostro..."
             cuadro_txt = "-"
             gaze_txt = "(-, -)"
+            gazed_cell = None
 
             # Señal visual de parpadeo, independiente de si se rechazan
             # frames para el gaze. La predicción de mirada no se toca.
@@ -521,14 +608,19 @@ class EyeTrackerApp:
             show_blink_frame = blink_frame_active(now, last_blink_at)
 
             use_feature = data["face_found"] and data["feature"] is not None
+            instant_cell = None
             # Solo se congela el cuadro si AMBOS ojos superan el umbral
             # (ver detect_blink). Un parpadeo real es breve; no se deja
             # de dibujar la última predicción.
-            if use_feature and not data["blink"]:
+            if use_feature:
                 raw_x, raw_y = self.mapper.predict(data["feature"])
                 raw_x = float(np.clip(raw_x, 0, self.screen_w - 1))
                 raw_y = float(np.clip(raw_y, 0, self.screen_h - 1))
+                # Casilla de ESTE frame (sin voto mayoritario) para marcar
+                # al instante en el flanco de subida del parpadeo.
+                instant_cell = compute_cell(raw_x, raw_y, self.screen_w, self.screen_h)
 
+            if use_feature and not data["blink"]:
                 if self.smoothed_point is None:
                     self.smoothed_point = (raw_x, raw_y)
                 else:
@@ -540,32 +632,20 @@ class EyeTrackerApp:
 
                 raw_cell = compute_cell(self.smoothed_point[0], self.smoothed_point[1],
                                          self.screen_w, self.screen_h)
-                stable_cell = self.stabilizer.update(raw_cell)
-
-                draw_highlight(canvas, stable_cell, self.screen_w, self.screen_h)
-                cv2.circle(canvas, (int(self.smoothed_point[0]), int(self.smoothed_point[1])),
-                           10, (255, 0, 0), -1)
+                gazed_cell = self.stabilizer.update(raw_cell)
+                # Misma casilla que el punto azul (no el voto de 10 frames).
+                last_open_cell = raw_cell
 
                 estado_txt = "Deteccion activa"
-                cuadro_txt = str(stable_cell)
+                cuadro_txt = str(gazed_cell)
                 gaze_txt = f"({int(self.smoothed_point[0])}, {int(self.smoothed_point[1])})"
             elif use_feature and data["blink"]:
                 if self.smoothed_point is None:
-                    raw_x, raw_y = self.mapper.predict(data["feature"])
-                    self.smoothed_point = (
-                        float(np.clip(raw_x, 0, self.screen_w - 1)),
-                        float(np.clip(raw_y, 0, self.screen_h - 1)),
-                    )
-                    self.stabilizer.update(compute_cell(
-                        self.smoothed_point[0], self.smoothed_point[1],
-                        self.screen_w, self.screen_h,
-                    ))
+                    self.smoothed_point = (raw_x, raw_y)
+                    self.stabilizer.update(instant_cell)
                 if self.smoothed_point is not None and self.stabilizer.history:
-                    stable_cell = self.stabilizer.history[-1]
-                    draw_highlight(canvas, stable_cell, self.screen_w, self.screen_h)
-                    cv2.circle(canvas, (int(self.smoothed_point[0]), int(self.smoothed_point[1])),
-                               10, (255, 0, 0), -1)
-                    cuadro_txt = str(stable_cell)
+                    gazed_cell = self.stabilizer.history[-1]
+                    cuadro_txt = str(gazed_cell)
                     gaze_txt = f"({int(self.smoothed_point[0])}, {int(self.smoothed_point[1])})"
                 estado_txt = "Parpadeo (se mantiene ultima posicion)"
             elif data["face_found"]:
@@ -573,13 +653,29 @@ class EyeTrackerApp:
             else:
                 estado_txt = "No se detecta el rostro"
 
+            mark_cell = gaze_cell_for_blink_mark(last_open_cell, instant_cell, eyes_closed)
+            selected_cell = next_selected_cell(
+                selected_cell, mark_cell, eyes_closed, was_closed
+            )
+            was_closed = eyes_closed
+
+            if selected_cell is not None:
+                draw_selected_cell(canvas, selected_cell, self.screen_w, self.screen_h)
+            draw_cell_labels(canvas, self.screen_w, self.screen_h, selected_cell)
+
+            if self.smoothed_point is not None:
+                cv2.circle(canvas, (int(self.smoothed_point[0]), int(self.smoothed_point[1])),
+                           10, (255, 0, 0), -1)
+
             if show_blink_frame:
                 draw_blink_frame(canvas)
                 estado_txt = "Parpadeo detectado"
 
+            azul_txt = str(selected_cell) if selected_cell is not None else "-"
             hud_lines = [
                 f"Gaze: {gaze_txt}",
-                f"Cuadro: {cuadro_txt}",
+                f"Mirando: {cuadro_txt}",
+                f"Azul: {azul_txt}",
                 f"FPS: {fps:.0f}",
                 f"Estado: {estado_txt}",
                 f"Blink R/L: {data.get('blink_score_a', 0.0):.2f}/"
