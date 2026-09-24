@@ -310,7 +310,11 @@ class GazeTracker:
         )
         self._landmarker = vision.FaceLandmarker.create_from_options(options)
 
-        self.cap = cv2.VideoCapture(camera_index)
+        # CAP_AVFOUNDATION evita cuelgues frecuentes de VideoCapture en macOS.
+        # En otros sistemas OpenCV ignora el backend si no aplica.
+        self.cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
             raise RuntimeError(
                 "No se pudo abrir la cámara web. Verifica que esté "

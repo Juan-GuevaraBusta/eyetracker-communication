@@ -311,15 +311,17 @@ class EyeTrackerApp:
         self.screen_w, self.screen_h = get_screen_resolution()
         self.grid_canvas = build_grid_canvas(self.screen_w, self.screen_h)
 
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
+        # En macOS, abrir fullscreen ANTES de la cámara puede colgar
+        # VideoCapture indefinidamente. Primero cámara/MediaPipe, luego UI.
         self.tracker = None
         self.camera_error = None
         try:
             self.tracker = GazeTracker()
         except Exception as exc:  # cámara no disponible (sección 18)
             self.camera_error = str(exc)
+
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
         self.mapper = calib.LinearGazeMapper()
         self.stabilizer = Stabilizer()
