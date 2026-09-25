@@ -104,28 +104,30 @@ class TestBlinkSelectsCell(unittest.TestCase):
 
 
 class TestCellLabels(unittest.TestCase):
-    def test_frases_en_orden_fila_por_columna(self):
-        from main import CELL_LABELS
+    def test_cada_categoria_tiene_nueve_opciones_y_volver(self):
+        from main import CATEGORIES, SUBMENUS
 
-        self.assertEqual(
-            [CELL_LABELS[i] for i in range(1, 10)],
-            [
-                "tengo hambre", "dejenme solo", "tengo sed",
-                "si", "como estas", "no",
-                "arriba", "me duele", "abajo",
-            ],
-        )
+        self.assertEqual(set(CATEGORIES), set(range(1, 10)))
+        self.assertEqual(set(SUBMENUS), set(range(1, 10)))
+        for cat, items in SUBMENUS.items():
+            self.assertEqual(set(items), set(range(1, 10)), cat)
+            self.assertIn("VOLVER", items[9]["label"])
 
-    def test_texto_cabe_dentro_de_la_celda(self):
-        from main import label_layout_for_cell, CELL_LABEL_FONT
+    def test_frases_clinicas_caben_en_la_tarjeta(self):
+        from main import SUBMENUS, label_layout_for_cell, CELL_LABEL_FONT
         import cv2
 
-        cell_w, cell_h = 420, 300
-        for text in ("dejenme solo", "tengo hambre", "si", "como estas"):
-            lines, scale, thickness = label_layout_for_cell(text, cell_w, cell_h)
+        cell_w, cell_h = 420, 140
+        phrases = [
+            item["label"]
+            for items in SUBMENUS.values()
+            for item in items.values()
+        ]
+        for text in phrases:
+            lines, scale, thickness = label_layout_for_cell(text, cell_w, cell_h, max_scale=0.95)
             max_w = 0
             total_h = 0
-            gap = int(max(8, scale * 16))
+            gap = int(max(4, scale * 10))
             for i, line in enumerate(lines):
                 (tw, th), _ = cv2.getTextSize(line, CELL_LABEL_FONT, scale, thickness)
                 max_w = max(max_w, tw)
@@ -134,7 +136,49 @@ class TestCellLabels(unittest.TestCase):
                     total_h += gap
             self.assertLessEqual(max_w, int(cell_w * 0.92), text)
             self.assertLessEqual(total_h, int(cell_h * 0.85), text)
-            self.assertGreaterEqual(scale, 0.8, text)
+            self.assertGreaterEqual(scale, 0.35, text)
+
+
+class TestMenuNavigation(unittest.TestCase):
+    def test_parpadeo_en_el_menu_entra_a_la_categoria(self):
+        from main import apply_menu_selection
+
+        category, selected, phrase = apply_menu_selection(
+            active_category=None, selected_cell=1, prev_selected=None, blink_edge=True,
+        )
+        self.assertEqual(category, 1)
+        self.assertIsNone(selected)
+        self.assertIsNone(phrase)
+
+    def test_parpadeo_en_subopcion_confirma_la_frase(self):
+        from main import apply_menu_selection
+
+        category, selected, phrase = apply_menu_selection(
+            active_category=1, selected_cell=1, prev_selected=None, blink_edge=True,
+        )
+        self.assertEqual(category, 1)
+        self.assertEqual(selected, 1)
+        self.assertEqual(phrase, "Tengo sed")
+
+    def test_casilla_volver_regresa_al_menu(self):
+        from main import apply_menu_selection
+
+        category, selected, phrase = apply_menu_selection(
+            active_category=9, selected_cell=9, prev_selected=None, blink_edge=True,
+        )
+        self.assertIsNone(category)
+        self.assertIsNone(selected)
+        self.assertIsNone(phrase)
+
+    def test_sin_flanco_de_parpadeo_no_navega(self):
+        from main import apply_menu_selection
+
+        category, selected, phrase = apply_menu_selection(
+            active_category=None, selected_cell=4, prev_selected=4, blink_edge=False,
+        )
+        self.assertIsNone(category)
+        self.assertEqual(selected, 4)
+        self.assertIsNone(phrase)
 
 
 if __name__ == "__main__":
