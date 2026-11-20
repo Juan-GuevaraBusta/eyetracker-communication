@@ -54,14 +54,81 @@ MEJORAS DE CALIBRACIÓN (basadas en documentación oficial de MediaPipe):
 """
 
 import os
+import sys
+import types
 import urllib.request
 
 import cv2
 import numpy as np
-import mediapipe as mp
-from mediapipe.tasks.python import vision
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.python.solutions import face_mesh_connections as _fmc
+
+
+def _load_face_landmarker():
+    """
+    Carga solo FaceLandmarker.
+
+    `import mediapipe` ejecuta el __init__ oficial, que a su vez importa
+    solutions (matplotlib), genai, audio, text y TODAS las tareas de
+    visión. En macOS eso se queda minutos en I/O sobre cientos de
+    protobuf y parece un cuelgue. Registramos paquetes ligeros y
+    importamos únicamente lo que usa el eye tracker.
+    """
+    os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
+    os.environ.setdefault("OPENCV_OPENCL_RUNTIME", "disabled")
+
+    root = None
+    for path in sys.path:
+        candidate = os.path.join(path, "mediapipe")
+        if os.path.isdir(os.path.join(candidate, "python")):
+            root = candidate
+            break
+    if root is None:
+        raise ImportError("No se encontró el paquete mediapipe en sys.path.")
+
+    def ensure_ns(name, path):
+        if name in sys.modules:
+            return sys.modules[name]
+        mod = types.ModuleType(name)
+        mod.__path__ = [path]
+        mod.__file__ = os.path.join(path, "__init__.py")
+        mod.__package__ = name
+        sys.modules[name] = mod
+        return mod
+
+    ensure_ns("mediapipe", root)
+    ensure_ns("mediapipe.tasks.python", os.path.join(root, "tasks", "python"))
+    ensure_ns(
+        "mediapipe.tasks.python.vision",
+        os.path.join(root, "tasks", "python", "vision"),
+    )
+
+    from mediapipe.python._framework_bindings.image import Image
+    from mediapipe.python._framework_bindings.image_frame import ImageFormat
+    from mediapipe.tasks.python.core.base_options import BaseOptions
+    from mediapipe.tasks.python.vision.face_landmarker import (
+        FaceLandmarker,
+        FaceLandmarkerOptions,
+    )
+    from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
+        VisionTaskRunningMode,
+    )
+
+    return {
+        "Image": Image,
+        "ImageFormat": ImageFormat,
+        "BaseOptions": BaseOptions,
+        "FaceLandmarker": FaceLandmarker,
+        "FaceLandmarkerOptions": FaceLandmarkerOptions,
+        "RunningMode": VisionTaskRunningMode,
+    }
+
+
+_MP = _load_face_landmarker()
+MpImage = _MP["Image"]
+MpImageFormat = _MP["ImageFormat"]
+BaseOptions = _MP["BaseOptions"]
+FaceLandmarker = _MP["FaceLandmarker"]
+FaceLandmarkerOptions = _MP["FaceLandmarkerOptions"]
+RunningMode = _MP["RunningMode"]
 
 # ---------------------------------------------------------------------------
 # Configuración de captura
@@ -115,14 +182,26 @@ def ensure_model_downloaded() -> str:
 EYE_A = {"outer": 33, "inner": 133, "top": 159, "bottom": 145}   # un ojo
 EYE_B = {"outer": 263, "inner": 362, "top": 386, "bottom": 374}  # el otro ojo
 
-# Contorno COMPLETO de cada ojo (16 puntos), tomado de los conjuntos
+# Contorno COMPLETO de cada ojo (16 puntos), copiado de los conjuntos
 # oficiales `FACEMESH_RIGHT_EYE` / `FACEMESH_LEFT_EYE` de
-# `mediapipe.python.solutions.face_mesh_connections`. Se usa el
-# min/max de todos estos puntos para estimar el ancho/alto del ojo de
-# forma mucho más robusta que con solo 2 esquinas (un único landmark
-# ruidoso afecta mucho menos al resultado).
-EYE_A_CONTOUR = sorted(set(i for pair in _fmc.FACEMESH_RIGHT_EYE for i in pair))
-EYE_B_CONTOUR = sorted(set(i for pair in _fmc.FACEMESH_LEFT_EYE for i in pair))
+# `mediapipe.python.solutions.face_mesh_connections`. Se evita importar
+# ese submódulo porque arrastra matplotlib y el resto de solutions.
+# Se usa el min/max de todos estos puntos para estimar el ancho/alto
+# del ojo de forma mucho más robusta que con solo 2 esquinas.
+_FACEMESH_RIGHT_EYE = (
+    (33, 7), (7, 163), (163, 144), (144, 145),
+    (145, 153), (153, 154), (154, 155), (155, 133),
+    (33, 246), (246, 161), (161, 160), (160, 159),
+    (159, 158), (158, 157), (157, 173), (173, 133),
+)
+_FACEMESH_LEFT_EYE = (
+    (263, 249), (249, 390), (390, 373), (373, 374),
+    (374, 380), (380, 381), (381, 382), (382, 362),
+    (263, 466), (466, 388), (388, 387), (387, 386),
+    (386, 385), (385, 384), (384, 398), (398, 362),
+)
+EYE_A_CONTOUR = sorted(set(i for pair in _FACEMESH_RIGHT_EYE for i in pair))
+EYE_B_CONTOUR = sorted(set(i for pair in _FACEMESH_LEFT_EYE for i in pair))
 
 # Los landmarks de iris se agregan cuando refine_landmarks/output con iris
 # está activo. Hay dos grupos de 5 puntos cada uno: [468-472] y [473-477].
@@ -294,13 +373,14 @@ class GazeTracker:
         # delegado por defecto puede fallar con un error fatal al crear
         # el servicio de GPU. CPU es más lento pero muchísimo más
         # portable, y para 640x480 en tiempo real es más que suficiente.
+        os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
         base_options = BaseOptions(
             model_asset_path=model_path,
             delegate=BaseOptions.Delegate.CPU,
         )
-        options = vision.FaceLandmarkerOptions(
+        options = FaceLandmarkerOptions(
             base_options=base_options,
-            running_mode=vision.RunningMode.VIDEO,
+            running_mode=RunningMode.VIDEO,
             num_faces=1,  # sección 18 del prompt: usar solo el rostro principal
             min_face_detection_confidence=0.5,
             min_face_presence_confidence=0.5,
@@ -308,7 +388,7 @@ class GazeTracker:
             output_face_blendshapes=True,             # para rechazo de parpadeos
             output_facial_transformation_matrixes=True,  # para compensar pose de cabeza
         )
-        self._landmarker = vision.FaceLandmarker.create_from_options(options)
+        self._landmarker = FaceLandmarker.create_from_options(options)
 
         # CAP_AVFOUNDATION evita cuelgues frecuentes de VideoCapture en macOS.
         # En otros sistemas OpenCV ignora el backend si no aplica.
@@ -349,7 +429,7 @@ class GazeTracker:
         h, w = frame_bgr.shape[:2]
 
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        mp_image = MpImage(image_format=MpImageFormat.SRGB, data=frame_rgb)
 
         timestamp_ms = int(self._frame_idx * (1000.0 / 30.0))
         self._frame_idx += 1

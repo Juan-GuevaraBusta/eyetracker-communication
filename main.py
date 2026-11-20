@@ -7,15 +7,22 @@ Navegación modular 3x3 adaptada a las 14 Necesidades BPS
 de Virginia Henderson (categorías clínicas y opciones contextuales).
 """
 
+import os
 import sys
 import time
 import unicodedata
 from collections import deque, Counter
 
+os.environ.setdefault("OPENCV_OPENCL_RUNTIME", "disabled")
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
+
+print("Importando OpenCV...", flush=True)
 import cv2
+print("OpenCV listo.", flush=True)
 import numpy as np
 
 import calibration as calib
+import caa_board
 
 # ---------------------------------------------------------------------------
 # Constantes de la interfaz
@@ -199,6 +206,30 @@ def apply_menu_selection(active_category, selected_cell, prev_selected, blink_ed
 # Utilidades de pantalla completa
 # ---------------------------------------------------------------------------
 def get_screen_resolution():
+    """Resolución de la pantalla principal. Evita screeninfo/tkinter en macOS:
+    `get_monitors()` puede bloquearse indefinidamente (Darwin 25+)."""
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+            import ctypes.util
+
+            lib = ctypes.util.find_library("CoreGraphics") or (
+                "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+            )
+            cg = ctypes.cdll.LoadLibrary(lib)
+            cg.CGMainDisplayID.restype = ctypes.c_uint32
+            cg.CGDisplayPixelsWide.argtypes = [ctypes.c_uint32]
+            cg.CGDisplayPixelsWide.restype = ctypes.c_size_t
+            cg.CGDisplayPixelsHigh.argtypes = [ctypes.c_uint32]
+            cg.CGDisplayPixelsHigh.restype = ctypes.c_size_t
+            display_id = cg.CGMainDisplayID()
+            width = int(cg.CGDisplayPixelsWide(display_id))
+            height = int(cg.CGDisplayPixelsHigh(display_id))
+            if width > 0 and height > 0:
+                return width, height
+        except Exception:
+            pass
+
     try:
         from screeninfo import get_monitors
         monitors = get_monitors()
@@ -206,18 +237,6 @@ def get_screen_resolution():
             m = monitors[0]
             if m.width and m.height:
                 return int(m.width), int(m.height)
-    except Exception:
-        pass
-
-    try:
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        w = root.winfo_screenwidth()
-        h = root.winfo_screenheight()
-        root.destroy()
-        if w and h:
-            return int(w), int(h)
     except Exception:
         pass
 
@@ -521,17 +540,23 @@ class FpsMeter:
 # ---------------------------------------------------------------------------
 class EyeTrackerApp:
     def __init__(self):
+        print("Detectando resolucion de pantalla...", flush=True)
         self.screen_w, self.screen_h = get_screen_resolution()
+        print(f"Pantalla {self.screen_w}x{self.screen_h}.", flush=True)
         self.grid_canvas = build_grid_canvas(self.screen_w, self.screen_h)
 
         # En macOS, abrir fullscreen antes de la cámara puede colgar VideoCapture.
         self.tracker = None
         self.camera_error = None
         try:
+            print("Cargando MediaPipe (FaceLandmarker)...", flush=True)
             from gaze import GazeTracker
+            print("Abriendo camara...", flush=True)
             self.tracker = GazeTracker()
+            print("Camara lista.", flush=True)
         except Exception as exc:
             self.camera_error = str(exc)
+            print("Error al iniciar camara/MediaPipe:", self.camera_error, flush=True)
 
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -569,6 +594,7 @@ class EyeTrackerApp:
             "5. No muevas la camara despues de calibrar.",
             "6. Sigue los puntos unicamente con los ojos.",
             "7. Mira directamente cada punto cuando aparezca.",
+            "8. Despues, parpadea sobre la frase para elegirla.",
             "",
             "Presiona ESPACIO para comenzar.",
             "ESC para salir.",
@@ -773,24 +799,19 @@ class EyeTrackerApp:
                 return
 
     def _state_tracking(self):
-        last_blink_at = None
         was_closed = False
-        selected_cell = None
-        last_open_cell = None
-        active_category = None
+        gazed_id = None
+        last_open_id = None
+        board = caa_board.Board()
+        gaze_stab = Stabilizer()
 
         while True:
             data = self._read()
             if data is None:
                 return STATE_QUIT, "Se perdió la conexión con la cámara."
 
-            fps = self.fps_meter.tick()
-            canvas = self.grid_canvas.copy()
-
-            estado_txt = "Buscando rostro..."
-            cuadro_txt = "-"
-            gaze_txt = "(-, -)"
-            gazed_cell = None
+            self.fps_meter.tick()
+            spec = caa_board.layout(board, self.screen_w, self.screen_h)
 
             from gaze import detect_blink
             eyes_closed = detect_blink(
@@ -798,21 +819,15 @@ class EyeTrackerApp:
                 data.get("blink_score_b", 0.0),
                 enabled=True,
             )
-            now = time.time()
-            if eyes_closed:
-                last_blink_at = now
-            show_blink_frame = blink_frame_active(now, last_blink_at)
 
             use_feature = data["face_found"] and data["feature"] is not None
-            instant_cell = None
 
             if use_feature:
                 raw_x, raw_y = self.mapper.predict(data["feature"])
                 raw_x = float(np.clip(raw_x, 0, self.screen_w - 1))
                 raw_y = float(np.clip(raw_y, 0, self.screen_h - 1))
-                instant_cell = compute_cell(raw_x, raw_y, self.screen_w, self.screen_h)
 
-            if use_feature and not data["blink"]:
+            if use_feature and not data.get("blink") and not eyes_closed:
                 if self.smoothed_point is None:
                     self.smoothed_point = (raw_x, raw_y)
                 else:
@@ -821,49 +836,34 @@ class EyeTrackerApp:
                         SMOOTHING_ALPHA * raw_x + (1 - SMOOTHING_ALPHA) * sx,
                         SMOOTHING_ALPHA * raw_y + (1 - SMOOTHING_ALPHA) * sy,
                     )
-
-                raw_cell = compute_cell(
-                    self.smoothed_point[0], self.smoothed_point[1],
-                    self.screen_w, self.screen_h,
+                hit = caa_board.target_at(
+                    spec["targets"], self.smoothed_point[0], self.smoothed_point[1],
                 )
-                gazed_cell = self.stabilizer.update(raw_cell)
-                last_open_cell = raw_cell
+                if hit:
+                    gazed_id = gaze_stab.update(hit)
+                    last_open_id = gazed_id
+                else:
+                    gazed_id = None
+            elif eyes_closed:
+                # El iris cerrado no sirve: se queda el último botón mirado.
+                gazed_id = last_open_id
 
-                estado_txt = "Deteccion activa"
-                cuadro_txt = str(gazed_cell)
-                gaze_txt = f"({int(self.smoothed_point[0])}, {int(self.smoothed_point[1])})"
-            elif use_feature and data["blink"]:
-                if self.smoothed_point is None:
-                    self.smoothed_point = (raw_x, raw_y)
-                    self.stabilizer.update(instant_cell)
-                if self.smoothed_point is not None and self.stabilizer.history:
-                    gazed_cell = self.stabilizer.history[-1]
-                    cuadro_txt = str(gazed_cell)
-                    gaze_txt = f"({int(self.smoothed_point[0])}, {int(self.smoothed_point[1])})"
-                estado_txt = "Parpadeo (se mantiene ultima posicion)"
-            elif data["face_found"]:
-                estado_txt = "Rostro detectado, landmarks incompletos"
-            else:
-                estado_txt = "No se detecta el rostro"
-
-            mark_cell = gaze_cell_for_blink_mark(last_open_cell, instant_cell, eyes_closed)
-            prev_selected = selected_cell
-            selected_cell = next_selected_cell(
-                selected_cell, mark_cell, eyes_closed, was_closed
-            )
             blink_edge = eyes_closed and not was_closed
-            active_category, selected_cell, phrase = apply_menu_selection(
-                active_category, selected_cell, prev_selected, blink_edge
-            )
-            if phrase:
-                self.last_phrase = phrase
-                print(f"[seleccion] {phrase}", flush=True)
+            if blink_edge and gazed_id:
+                before = board.mark()
+                phrase = board.activate(gazed_id)
+                if phrase:
+                    self.last_phrase = phrase
+                    print(f"[seleccion] {phrase}", flush=True)
+                if board.mark() != before:
+                    gaze_stab.reset()
+                    gazed_id = None
+                    last_open_id = None
+                    spec = caa_board.layout(board, self.screen_w, self.screen_h)
             was_closed = eyes_closed
 
-            items_to_draw = active_items(active_category)
-            if selected_cell is not None:
-                draw_selected_cell(canvas, selected_cell, self.screen_w, self.screen_h)
-            draw_cell_labels(canvas, self.screen_w, self.screen_h, items_to_draw, selected_cell)
+            canvas = np.full((self.screen_h, self.screen_w, 3), caa_board.PAPER, dtype=np.uint8)
+            caa_board.paint(canvas, spec, gazed_id)
 
             if self.smoothed_point is not None:
                 cv2.circle(
@@ -872,28 +872,15 @@ class EyeTrackerApp:
                     10, (255, 0, 0), -1,
                 )
 
-            if show_blink_frame:
-                draw_blink_frame(canvas)
-                estado_txt = "Parpadeo detectado"
-
-            categoria_str = (
-                "MENU PRINCIPAL" if active_category is None
-                else CATEGORIES[active_category]["label"]
-            )
-            hud_lines = [categoria_str]
-            if self.last_phrase:
-                hud_lines.append(self.last_phrase)
-            draw_text_block(canvas, hud_lines, org=(30, 42), scale=0.7, line_gap=28)
-            draw_camera_preview(canvas, data["frame_bgr"], data["face_found"], self.screen_w)
-
-            controles = (
-                f"Mirando {cuadro_txt}   {estado_txt}   {fps:.0f} fps"
-                "    ESC salir   R recalibrar   Parpadeo elige"
-            )
-            cv2.putText(
-                canvas, opencv_text(controles), (30, self.screen_h - 18),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA,
-            )
+            px0, py0, px1, py1 = spec["preview"]
+            px0, py0 = max(0, int(px0)), max(0, int(py0))
+            px1, py1 = min(self.screen_w, int(px1)), min(self.screen_h, int(py1))
+            frame = data["frame_bgr"]
+            if frame is not None and px1 > px0 and py1 > py0:
+                thumb = cv2.resize(frame, (px1 - px0, py1 - py0))
+                canvas[py0:py1, px0:px1] = thumb
+                edge = (60, 180, 60) if data["face_found"] else (0, 0, 220)
+                cv2.rectangle(canvas, (px0, py0), (px1 - 1, py1 - 1), edge, 2)
 
             cv2.imshow(WINDOW_NAME, canvas)
             key = cv2.waitKey(1) & 0xFF

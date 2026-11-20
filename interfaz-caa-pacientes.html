@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interfaz de comunicación para pacientes intubados</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #f3efe6; color: #1c1915;
+    font-family: "Avenir Next", "Segoe UI", sans-serif; }
+  button { font-family: inherit; color: inherit; cursor: pointer; }
+
+  /* El color es la categoría: se mantiene en toda la rama. */
+  .c-A { --bg: #d4e4fb; --bd: #0e4a94; --hd: #e7f0fc; --ink: #0c2347; }
+  .c-B { --bg: #ffd7a8; --bd: #8a3e00; --hd: #fff0dc; --ink: #3d1c00; }
+  .c-C { --bg: #c5e8c6; --bd: #1a5c22; --hd: #e4f6e5; --ink: #0e3314; }
+  .c-D { --bg: #e2d0f7; --bd: #4c248f; --hd: #f3eafc; --ink: #2a1254; }
+  .c-H { --bg: #e6ebf0; --bd: #243140; --hd: #f7f5f0; --ink: #1c1915; }
+
+  #app { height: 100vh; height: 100dvh; display: flex; flex-direction: column;
+    padding: 1.2vh 1.2vw; gap: 1.2vh; background: #f3efe6; color: var(--ink); }
+
+  header { flex: none; min-height: 12vh; display: flex; align-items: center; gap: 1.6vw;
+    padding: 1.2vh 1.6vw 1.2vh 1.8vw; background: var(--hd); color: var(--ink);
+    border: .45vh solid var(--bd); border-left-width: 1.5vh; border-radius: .7vh; }
+  .ttl { flex: 1; min-width: 0; }
+  .kicker { font-size: clamp(13px, min(1.15vw, 2vh), 18px); font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--bd); }
+  h1 { font-size: clamp(22px, min(2.5vw, 4.2vh), 46px); font-weight: 750; line-height: 1.08; }
+  .home h1 { text-transform: uppercase; font-weight: 800; }
+  .sub { font-size: clamp(16px, min(1.5vw, 2.6vh), 28px); font-weight: 650; margin-top: .35vh; }
+  .pill { flex: none; background: none; border: 0; padding: 0; border-radius: 0;
+    font-size: clamp(18px, min(1.7vw, 3vh), 32px); font-weight: 750;
+    font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink); }
+  .help { flex: none; height: 9vh; width: 24vw; background: #8e1b16; color: #fff;
+    border: .4vh solid #5c100d; border-radius: .7vh; font-size: clamp(16px, min(1.5vw, 2.6vh), 28px);
+    font-weight: 800; letter-spacing: .04em; display: flex; align-items: center; justify-content: center; gap: .7vw; }
+  .help:hover { background: #751612; }
+  .help:active { transform: translateY(.35vh); }
+
+  main { flex: 1; min-height: 0; display: grid;
+    grid-template-columns: 10vw minmax(0, 1fr) 10vw;
+    grid-template-areas: "prev grid next"; gap: 1.1vw; }
+  .side { min-height: 0; display: flex; }
+  .side:first-child { grid-area: prev; }
+  .side:last-child { grid-area: next; }
+  .grid { grid-area: grid; display: grid; min-height: 0; gap: 1.2vh 1.1vw;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+  .grid.ask { grid-template-rows: 1.35fr 1fr; }
+  .grid.sent { grid-template-rows: 1.75fr .9fr; }
+
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 1.2vw;
+    padding: 1.6vh 1.5vw; min-height: 0; overflow: visible;
+    background: var(--bg); color: var(--ink); border: .45vh solid var(--bd); border-left-width: 1.2vh;
+    border-radius: .7vh; font-size: clamp(18px, min(2.15vw, 3.6vh), 40px); font-weight: 700;
+    line-height: 1.15; text-align: left; }
+  .opt:hover { box-shadow: inset 0 0 0 .35vh var(--bd); }
+  .opt:active { transform: translateY(.35vh); }
+  .opt .txt { flex: 1; min-width: 0; overflow-wrap: break-word; }
+  .opt .ico { flex: none; font-size: .72em; line-height: 1;
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+  .home .opt { text-transform: uppercase; font-weight: 800; }
+  .opt.big { justify-content: center; text-align: center; border-left-width: .45vh;
+    font-size: clamp(20px, min(2.6vw, 4.6vh), 48px); font-weight: 800; letter-spacing: .03em; }
+  .opt.span2 { grid-column: 1 / -1; }
+  .yes { --bg: #b7e0bc; --bd: #146024; --ink: #0c3d16; }
+  .no  { --bg: #e4e2db; --bd: #2c3340; --ink: #1c1915; }
+  .redbtn { --bg: #f4c7c3; --bd: #8e1b16; --ink: #5c100d; }
+
+  .arrow { width: 100%; background: #f7f5f0; color: #1c1915; border: .45vh solid #243140;
+    border-radius: .7vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1vh; font-weight: 800; font-size: clamp(12px, min(1.05vw, 1.9vh), 18px); letter-spacing: .06em; }
+  .arrow .ar { font-size: clamp(28px, min(3.2vw, 6vh), 64px); line-height: 1; font-weight: 500; }
+  .arrow:hover:not(:disabled) { background: #e7e1d4; }
+  .arrow:active:not(:disabled) { transform: translateY(.35vh); }
+  .arrow:disabled { opacity: .38; cursor: default; border-style: dashed; background: transparent; }
+
+  .msg { grid-column: 1 / -1; background: #f7f5f0; color: var(--ink); border: .45vh solid var(--bd);
+    border-radius: .7vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 2vh 2.4vw; gap: 1.1vh; min-height: 0; overflow: hidden; }
+  .msg:has(.band) { justify-content: flex-start; padding-top: 0; }
+  .msg:has(.band) > :nth-child(2) { margin-top: auto; }
+  .msg:has(.band) > :last-child { margin-bottom: auto; }
+  .msg .big-ico { font-size: .55em; line-height: 1; margin-right: .25em;
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; }
+  .msg .m1 { font-size: clamp(22px, min(2.8vw, 5vh), 56px); font-weight: 800; line-height: 1.12; }
+  .msg .who { font-size: clamp(14px, min(1.25vw, 2.2vh), 22px); font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; }
+  .msg .note { font-size: clamp(14px, min(1.25vw, 2.2vh), 22px); font-weight: 600; line-height: 1.3; max-width: 62ch; }
+  .band { align-self: stretch; margin: 0 -2.4vw 0; padding: 1.1vh 1.4vw;
+    background: #8e1b16; color: #fff; font-size: clamp(14px, min(1.3vw, 2.3vh), 24px);
+    font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .band.ok { background: #146024; }
+  .urgent .msg { background: #fff6f4; border-color: #8e1b16; }
+
+  .alert header { background: #8e1b16; color: #fff; border-color: #5c100d; }
+  .alert .kicker, .alert h1, .alert .pill { color: #fff; }
+  .alert .msg { background: #8e1b16; color: #fff; border-color: #5c100d; }
+  .alert .msg .m1 { font-size: clamp(24px, min(3.6vw, 6.4vh), 72px); }
+  .alert .band { background: #fff; color: #8e1b16; }
+  .alert .opt { --bg: #fff; --bd: #5c100d; --ink: #5c100d; }
+
+  footer { flex: none; height: 12vh; }
+  footer:empty { display: none; }
+  .back { width: 100%; height: 100%; background: #1c1915; color: #f7f5f0; border: 0; border-radius: .7vh;
+    font-size: clamp(20px, min(2.4vw, 4.2vh), 42px); font-weight: 800; letter-spacing: .06em; }
+  .back:hover { background: #000; }
+  .back:active { transform: translateY(.35vh); }
+  .hint { height: 100%; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: clamp(16px, min(1.6vw, 2.8vh), 28px); font-weight: 650; color: #3d3830; }
+
+  button:focus-visible { outline: .45vh solid #1c1915; outline-offset: .25vh; }
+
+  @media (max-width: 800px) {
+    header { flex-wrap: wrap; align-items: stretch; gap: 1vh; }
+    .ttl { flex: 1 1 100%; }
+    .pill { flex: 1 1 auto; }
+    .help { width: 100%; height: 8vh; order: 3; }
+    main { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto;
+      grid-template-areas: "grid grid" "prev next"; gap: 1.1vh; }
+    .side:not(:has(button)) { display: none; }
+    .arrow { min-height: 11vh; flex-direction: row; gap: 1vw; }
+    footer { height: 11vh; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =====================================================================
+   INTERFAZ CAA PARA PACIENTES INTUBADOS — prototipo (solo clics)
+   Marco: 14 necesidades de Virginia Henderson, agrupadas en 4 categorías.
+   No incluye eyetracking, dwell, temporizadores ni hardware.
+   ===================================================================== */
+
+/* ---------- Constructores de opciones ---------- */
+function G(label, icon, to, o) { return Object.assign({ label: label, icon: icon, to: to }, o || {}); }   // abre otra pantalla
+function F(label, icon, o)     { return Object.assign({ label: label, icon: icon }, o || {}); }            // mensaje final
+function P(label, icon, o)     { return Object.assign({ label: label, icon: icon, intensity: true }, o || {}); } // pasa por valoración de intensidad
+var URG = { urgent: true };  // genera aviso prioritario
+var EV  = { ev: true };      // requiere evaluación del personal sanitario
+var UN  = { un: true };      // comunicación no contemplada
+
+/* Opciones para comunicación no contemplada (completan páginas incompletas).
+   FUTURO: aquí puede enlazarse una pantalla de teclado alfabético (to: 'teclado'). */
+var EXTRAS = [
+  F('Quiero comunicar algo diferente', '💬', UN),
+  F('No encuentro lo que necesito', '🔎', UN),
+  F('Necesito ayuda, pero no sé cómo explicarlo', '🤷', UN),
+  F('Quiero hablar con el personal de salud', '🧑‍⚕️', UN),
+  F('Quiero otra cosa', '➕', UN)
+];
+
+var INTENS = [
+  { label: 'Es una molestia leve', icon: '🟢' },
+  { label: 'Es una molestia moderada', icon: '🟡' },
+  { label: 'Es una molestia intensa', icon: '🔴', urgent: true },
+  { label: 'No sé cómo describirla', icon: '❔' }
+];
+
+/* ---------- Árbol de pantallas ---------- */
+var NODES = {
+  home: { title: '¿Qué quieres comunicar?', cat: 'H', items: [
+    G('QUIERO QUE ME AYUDEN', '🤝', 'menuA'),
+    G('SIENTO ALGO', '🩺', 'menuB'),
+    G('QUIERO COMUNICAR ALGO', '💬', 'menuC'),
+    G('QUIERO HACER O CONOCER ALGO', '🎯', 'menuD')
+  ]},
+
+  /* ===== A. QUIERO QUE ME AYUDEN ===== */
+  menuA: { title: 'Quiero que me ayuden', cat: 'A', items: [
+    G('Con mi cuerpo y comodidad', '🛏️', 'A_cuerpo'),
+    G('Con mi alimentación e hidratación', '💧', 'A_alim'),
+    G('Con mi higiene y cuidado personal', '🧼', 'A_hig'),
+    G('Con mis necesidades fisiológicas', '🚻', 'A_fis'),
+    F('Quiero que revisen mi tubo o equipo respiratorio', '🫁', EV),
+    F('Necesito ayuda para realizar una actividad', '🙋'),
+    F('Necesito otra cosa', '➕', UN),
+    EXTRAS[2]
+  ]},
+  A_cuerpo: { title: 'Con mi cuerpo y comodidad', cat: 'A', items: [
+    F('Necesito que me cambien de posición', '🔄'),
+    F('Necesito que me acomoden la cabeza', '🛏️'),
+    F('Necesito que me acomoden los brazos o las piernas', '🦵'),
+    F('Necesito que me ayuden a moverme', '🚶'),
+    F('Necesito descansar o dormir', '😴'),
+    F('Necesito que me ayuden a vestirme o acomodar mi ropa', '👕'),
+    F('Necesito que ajusten mi temperatura o mis cobijas', '🌡️'),
+    F('Necesito ayuda con otro aspecto de mi comodidad', '🛋️', UN)
+  ]},
+  A_alim: { title: 'Con mi alimentación e hidratación', cat: 'A', items: [
+    F('Necesito que me humedezcan la boca', '💧', EV),
+    F('Necesito que me hidraten los labios', '👄', EV),
+    F('Necesito que me ayuden con mi alimentación', '🍽️', EV),
+    F('Necesito consultar si puedo beber o comer algo', '❓', EV)
+  ]},
+  A_hig: { title: 'Con mi higiene y cuidado personal', cat: 'A', items: [
+    F('Necesito que me limpien la boca', '🪥'),
+    F('Necesito que me limpien la cara o los ojos', '🧽'),
+    F('Necesito que me limpien el cuerpo', '🛁'),
+    F('Necesito que me acomoden el cabello o me ayuden con mi aseo', '💇')
+  ]},
+  A_fis: { title: 'Con mis necesidades fisiológicas', cat: 'A', items: [
+    F('Necesito orinar', '🚻'),
+    F('Necesito evacuar', '🚽'),
+    F('Necesito que revisen mi sonda o bolsa de orina', '🩺', EV),
+    F('Necesito ayuda con otra necesidad fisiológica', '➕', UN)
+  ]},
+
+  /* ===== B. SIENTO ALGO ===== */
+  menuB: { title: 'Siento algo', cat: 'B', items: [
+    G('Siento dolor', '😣', 'B_dolor'),
+    G('Tengo molestias físicas', '🤢', 'B_mol'),
+    G('Siento cambios en mi cuerpo', '🌡️', 'B_cam'),
+    G('Tengo dificultad para respirar', '🫁', 'B_resp'),
+    F('Siento que algo puede lastimarme', '⚠️', URG),
+    EXTRAS[2], EXTRAS[1], EXTRAS[3]
+  ]},
+  B_dolor: { title: 'Siento dolor', cat: 'B', items: [
+    P('Me duele la cabeza', '🤕'),
+    P('Me duele el pecho', '💔'),
+    P('Me duele el abdomen', '😖'),
+    G('Me duele otra parte del cuerpo', '📍', 'B_dolor2')
+  ]},
+  B_dolor2: { title: 'Me duele otra parte del cuerpo', cat: 'B', items: [
+    P('Me duele la espalda', '🔙'),
+    P('Me duelen los brazos o las manos', '💪'),
+    P('Me duelen las piernas o los pies', '🦶'),
+    P('Me duele otra zona', '📍', UN)
+  ]},
+  B_mol: { title: 'Tengo molestias físicas', cat: 'B', items: [
+    P('Tengo náuseas', '🤢'),
+    P('Tengo picazón', '🖐️'),
+    P('Tengo mareo', '😵'),
+    P('Tengo molestias en la boca o garganta', '👄')
+  ]},
+  B_cam: { title: 'Siento cambios en mi cuerpo', cat: 'B', items: [
+    F('Tengo frío', '🥶'),
+    F('Tengo calor', '🥵'),
+    F('Tengo escalofríos', '🤧'),
+    F('Siento sudoración excesiva', '💦')
+  ]},
+  B_resp: { title: 'Tengo dificultad para respirar', cat: 'B', items: [
+    F('Siento que me falta el aire', '🫁', URG),
+    F('Siento presión en el pecho', '❗', URG),
+    F('Siento molestias al respirar', '😮‍💨'),
+    F('Siento molestias relacionadas con el tubo', '⚠️', URG)
+  ]},
+
+  /* ===== C. QUIERO COMUNICAR ALGO ===== */
+  menuC: { title: 'Quiero comunicar algo', cat: 'C', items: [
+    G('Quiero expresar cómo me siento', '🙂', 'C_sent'),
+    G('Quiero comunicarme con alguien', '👥', 'C_com'),
+    G('Quiero expresar mis preferencias', '☑️', 'C_pref'),
+    G('Quiero hablar sobre mis creencias y valores', '🕊️', 'C_cre'),
+    EXTRAS[0], EXTRAS[1], EXTRAS[3], EXTRAS[4]
+  ]},
+  C_sent: { title: 'Quiero expresar cómo me siento', cat: 'C',
+    pt: { 2: '¿Qué necesito emocionalmente?' }, items: [
+    F('Estoy triste', '😢'),
+    F('Estoy preocupado/a', '😟'),
+    F('Estoy asustado/a', '😨'),
+    F('Estoy tranquilo/a', '😌'),
+    F('Me siento solo/a', '🫂'),
+    F('Estoy frustrado/a', '😤'),
+    F('Estoy aburrido/a', '🥱'),
+    F('Me siento acompañado/a', '🤗'),
+    F('Necesito que me escuchen', '👂'),
+    F('Necesito que me tranquilicen', '🧘'),
+    F('Necesito que me acompañen', '🤝'),
+    F('Necesito estar un momento a solas', '🚪')
+  ]},
+  C_com: { title: 'Quiero comunicarme con alguien', cat: 'C', items: [
+    G('Quiero hablar con mi familia', '👨‍👩‍👧', 'C_fam'),
+    F('Quiero hablar con mis amigos', '🧑‍🤝‍🧑'),
+    G('Quiero hablar con el personal de salud', '🧑‍⚕️', 'C_salud'),
+    F('Quiero comunicarme con otra persona', '👤', UN)
+  ]},
+  C_fam: { title: 'Quiero hablar con mi familia', cat: 'C', items: [
+    F('Los extraño', '💞'),
+    F('Quiero saber cómo están', '❓'),
+    F('Quiero que vengan a visitarme', '🏠'),
+    F('Quiero enviarles un mensaje', '✉️')
+  ]},
+  C_salud: { title: 'Quiero hablar con el personal de salud', cat: 'C', items: [
+    F('Quiero hacerles una pregunta', '❓'),
+    F('Quiero contarles algo', '🗣️'),
+    F('Quiero que me expliquen algo', '📋'),
+    F('Quiero agradecerles', '🙏')
+  ]},
+  C_pref: { title: 'Quiero expresar mis preferencias', cat: 'C', items: [
+    F('Prefiero estar acompañado/a', '🤝'),
+    F('Prefiero tener privacidad', '🚪'),
+    F('Quiero participar en las decisiones sobre mi cuidado', '☑️'),
+    G('No estoy de acuerdo con algo', '✋', 'C_desac')
+  ]},
+  C_desac: { title: 'No estoy de acuerdo con algo', cat: 'C', items: [
+    F('No quiero que realicen ese procedimiento todavía', '✋'),
+    F('Quiero que me expliquen antes de hacerlo', '📋'),
+    F('Quiero expresar una preocupación', '😟'),
+    F('Quiero hablar con alguien sobre mi decisión', '🗣️')
+  ]},
+  C_cre: { title: 'Quiero hablar sobre mis creencias y valores', cat: 'C', items: [
+    F('Quiero orar o rezar', '🙏'),
+    F('Quiero recibir acompañamiento espiritual', '🕊️'),
+    F('Quiero hablar sobre mis creencias', '💭'),
+    F('Quiero contactar a alguien de mi comunidad religiosa o espiritual', '⛪'),
+    F('Quiero que respeten mis costumbres', '🤲'),
+    F('Quiero hablar sobre algo importante para mí', '⭐')
+  ]},
+
+  /* ===== D. QUIERO HACER O CONOCER ALGO ===== */
+  menuD: { title: 'Quiero hacer o conocer algo', cat: 'D', items: [
+    G('Quiero entretenerme', '🎵', 'D_ent'),
+    G('Quiero aprender o saber algo', '📖', 'D_apr'),
+    G('Quiero participar en mi recuperación', '📈', 'D_part'),
+    G('Quiero realizar una actividad', '✏️', 'D_act'),
+    EXTRAS[0], EXTRAS[1], EXTRAS[3], EXTRAS[4]
+  ]},
+  D_ent: { title: 'Quiero entretenerme', cat: 'D', items: [
+    G('Quiero escuchar música', '🎵', 'D_mus'),
+    F('Quiero ver televisión o videos', '📺'),
+    F('Quiero ver fotografías', '🖼️'),
+    F('Quiero jugar o realizar una actividad recreativa', '🎲')
+  ]},
+  D_mus: { title: 'Quiero escuchar música', cat: 'D', items: [
+    F('Quiero escuchar música tranquila', '🌿'),
+    F('Quiero escuchar música alegre', '🎶'),
+    F('Quiero escuchar mi música favorita', '⭐'),
+    F('Quiero escuchar otro tipo de música', '🎧', UN)
+  ]},
+  D_apr: { title: 'Quiero aprender o saber algo', cat: 'D', items: [
+    F('Quiero saber qué está pasando conmigo', '❓'),
+    F('Quiero conocer mi diagnóstico', '📋'),
+    F('Quiero entender mi tratamiento', '💊'),
+    F('Quiero saber cómo va mi recuperación', '📈'),
+    F('Quiero saber qué procedimientos me van a realizar', '🩺'),
+    F('Quiero saber para qué sirven los dispositivos que tengo conectados', '🔌'),
+    F('Quiero saber cuánto tiempo estaré hospitalizado/a', '🗓️'),
+    F('Quiero hacer otra pregunta', '❓', UN)
+  ]},
+  D_part: { title: 'Quiero participar en mi recuperación', cat: 'D', items: [
+    F('Quiero conocer los avances de mi recuperación', '📈'),
+    F('Quiero participar en las decisiones sobre mi cuidado', '☑️'),
+    F('Quiero establecer una meta para mi recuperación', '🎯'),
+    F('Quiero colaborar en las actividades que pueda realizar', '🙌')
+  ]},
+  D_act: { title: 'Quiero realizar una actividad', cat: 'D', items: [
+    F('Quiero leer', '📖'),
+    F('Quiero escribir o dibujar', '✏️'),
+    F('Quiero revisar mis fotografías', '🖼️'),
+    F('Quiero proponer otra actividad', '➕', UN),
+    F('Quiero hablar sobre mi trabajo o estudios', '🎓'),
+    F('Quiero organizar algo pendiente', '🗂️'),
+    F('Quiero realizar una actividad que me haga sentir productivo/a', '✅')
+  ]}
+};
+
+/* Cada página tiene exactamente 4 opciones: se completan con opciones de comunicación no contemplada */
+function buildPages(items) {
+  var all = items.slice();
+  var k = 0;
+  while (all.length % 4 !== 0) {
+    all.push(EXTRAS[k]);
+    k = k + 1;
+  }
+  var pages = [];
+  var i = 0;
+  while (i < all.length) {
+    pages.push(all.slice(i, i + 4));
+    i = i + 4;
+  }
+  return pages;
+}
+Object.keys(NODES).forEach(function (id) { NODES[id].pages = buildPages(NODES[id].items); });
+
+/* ---------- Estado de navegación ---------- */
+var hist = [{ kind: 'menu', node: 'home', page: 0 }];  // pila de pantallas (conserva categoría y página)
+var overlay = null;                                      // null | 'confirm' | 'alert' (ayuda inmediata)
+var app = document.getElementById('app');
+
+function cur() { return hist[hist.length - 1]; }
+
+/* ---------- Render ---------- */
+var CATS = { A: 'Ayuda', B: 'Sensación', C: 'Comunicar', D: 'Hacer o conocer', H: '' };
+
+function shell(o) {
+  app.className = 'c-' + o.cat + (o.cls ? ' ' + o.cls : '');
+  var h = '<header><div class="ttl">';
+  if (o.kicker) { h += '<p class="kicker">' + o.kicker + '</p>'; }
+  h += '<h1>' + o.title + '</h1>' + (o.sub ? '<p class="sub">' + o.sub + '</p>' : '') + '</div>';
+  if (o.pill) { h += '<p class="pill">' + o.pill + '</p>'; }
+  if (o.help !== false) {
+    h += '<button class="help" data-act="help" aria-label="Solicitar ayuda inmediata">AYUDA INMEDIATA</button>';
+  }
+  h += '</header>';
+  h += '<main><div class="side">' + (o.left || '') + '</div><div class="grid ' + (o.gridCls || '') + '">' + o.grid + '</div><div class="side">' + (o.right || '') + '</div></main>';
+  h += '<footer>' + (o.footer || '') + '</footer>';
+  app.innerHTML = h;
+}
+
+var BACK_BTN = '<button class="back" data-act="back">REGRESAR</button>';
+
+function renderMenu(s) {
+  var n = NODES[s.node];
+  var items = n.pages[s.page];
+  var total = n.pages.length;
+  var home = (hist.length === 1);
+  var title = (n.pt && n.pt[s.page]) ? n.pt[s.page] : n.title;
+  var grid = '';
+  var i = 0;
+  while (i < items.length) {
+    var it = items[i];
+    var cat = home ? NODES[it.to].cat : n.cat;
+    grid += '<button class="opt c-' + cat + '" data-act="open" data-i="' + i + '"><span class="txt">' + it.label + '</span><span class="ico" aria-hidden="true">' + it.icon + '</span></button>';
+    i = i + 1;
+  }
+  var left = '';
+  var right = '';
+  if (total > 1) {
+    left = '<button class="arrow" data-act="prev" aria-label="Cuatro opciones anteriores"' + (s.page === 0 ? ' disabled' : '') + '><span class="ar">◀</span><span>ANTERIOR</span></button>';
+    right = '<button class="arrow" data-act="next" aria-label="Cuatro opciones siguientes"' + (s.page === total - 1 ? ' disabled' : '') + '><span class="ar">▶</span><span>SIGUIENTE</span></button>';
+  }
+  shell({
+    cat: n.cat, title: title, cls: home ? 'home' : '',
+    kicker: home ? '' : CATS[n.cat],
+    pill: total > 1 ? (s.page + 1) + ' / ' + total : '',
+    grid: grid, left: left, right: right,
+    footer: home ? '<p class="hint">Elige una de las cuatro opciones</p>' : BACK_BTN
+  });
+}
+
+function renderIntensity(s) {
+  var grid = '';
+  var i = 0;
+  while (i < INTENS.length) {
+    grid += '<button class="opt c-' + s.cat + '" data-act="open" data-i="' + i + '"><span class="txt">' + INTENS[i].label + '</span><span class="ico" aria-hidden="true">' + INTENS[i].icon + '</span></button>';
+    i = i + 1;
+  }
+  shell({ cat: s.cat, kicker: CATS[s.cat], title: '¿Qué tan intensa es la molestia?', sub: s.base, grid: grid, footer: BACK_BTN });
+}
+
+function renderConfirm(s) {
+  var grid = '<div class="msg">' +
+    (s.urgent ? '<p class="band">Mensaje prioritario</p>' : '') +
+    '<p class="m1"><span class="big-ico" aria-hidden="true">' + s.icon + '</span>' + s.msg + '</p></div>' +
+    '<button class="opt big yes" data-act="yes">SÍ, ES ESO</button>' +
+    '<button class="opt big no" data-act="no">NO, QUIERO CAMBIAR</button>';
+  shell({ cat: s.cat, kicker: CATS[s.cat], title: '¿Esto es lo que quieres comunicar?', cls: s.urgent ? 'urgent' : '', gridCls: 'ask', grid: grid, footer: BACK_BTN });
+}
+
+function renderSent(s) {
+  var notes = [];
+  if (s.ev) { notes.push('El personal de salud evaluará esta solicitud antes de actuar. No manipules dispositivos ni tomes líquidos o alimentos sin autorización.'); }
+  if (s.un) { notes.push('Esto no está en la lista: el personal de salud debe acercarse para ayudar al paciente a expresar lo que necesita.'); }
+  notes.push('Prototipo: comunicación simulada. No se envió a ningún sistema real.');
+  var grid = '<div class="msg">' +
+    '<p class="band' + (s.urgent ? '' : ' ok') + '">' + (s.urgent ? 'Aviso prioritario para el personal de salud' : 'Solicitud comunicada al personal de salud') + '</p>' +
+    '<p class="who">El paciente comunica</p>' +
+    '<p class="m1"><span class="big-ico" aria-hidden="true">' + s.icon + '</span>' + s.msg + '</p>' +
+    '<p class="note">' + notes.join('<br>') + '</p></div>' +
+    '<button class="opt big span2" data-act="home">VOLVER AL MENÚ PRINCIPAL</button>';
+  shell({ cat: s.cat, kicker: CATS[s.cat], title: s.urgent ? 'Aviso prioritario' : 'Mensaje comunicado', cls: s.urgent ? 'alert' : '', gridCls: 'sent', grid: grid, help: false, footer: '' });
+}
+
+function renderOverlay() {
+  if (overlay === 'confirm') {
+    var grid = '<div class="msg">' +
+      '<p class="m1">Se mostrará un aviso de ayuda inmediata</p>' +
+      '<p class="note">Simulación del prototipo: no se enviará ninguna alerta real.</p></div>' +
+      '<button class="opt big redbtn" data-act="helpYes">SÍ, NECESITO AYUDA</button>' +
+      '<button class="opt big no" data-act="helpNo">NO, CANCELAR</button>';
+    shell({ cat: 'H', title: '¿Necesitas ayuda inmediata?', gridCls: 'ask', grid: grid, help: false, footer: BACK_BTN });
+  } else {
+    var g2 = '<div class="msg"><p class="band">Ayuda inmediata</p>' +
+      '<p class="m1">El paciente solicita ayuda inmediata</p>' +
+      '<p class="note">Aviso simulado del prototipo: no se ha enviado ninguna alerta real.</p></div>' +
+      '<button class="opt big span2" data-act="helpDone">CONTINUAR</button>';
+    shell({ cat: 'H', title: 'Ayuda inmediata', cls: 'alert', gridCls: 'sent', grid: g2, help: false, footer: '' });
+  }
+}
+
+function render() {
+  if (overlay) { renderOverlay(); return; }
+  var s = cur();
+  if (s.kind === 'menu') { renderMenu(s); }
+  else if (s.kind === 'intensity') { renderIntensity(s); }
+  else if (s.kind === 'confirm') { renderConfirm(s); }
+  else { renderSent(s); }
+}
+
+/* ---------- Acciones ---------- */
+function openItem(s, i) {
+  if (s.kind === 'intensity') {
+    var lv = INTENS[i];
+    hist.push({ kind: 'confirm', msg: s.base + '. ' + lv.label + '.', icon: s.icon, cat: s.cat, urgent: !!lv.urgent, ev: false, un: false });
+    return;
+  }
+  var n = NODES[s.node];
+  var it = n.pages[s.page][i];
+  if (it.to) {
+    hist.push({ kind: 'menu', node: it.to, page: 0 });
+  } else if (it.intensity) {
+    hist.push({ kind: 'intensity', base: it.label, icon: it.icon, cat: n.cat });
+  } else {
+    hist.push({ kind: 'confirm', msg: it.label, icon: it.icon, cat: n.cat, urgent: !!it.urgent, ev: !!it.ev, un: !!it.un });
+  }
+}
+
+function dispatch(act, i) {
+  if (overlay) {
+    if (act === 'helpYes') { overlay = 'alert'; }
+    else if (act === 'helpNo' || act === 'helpDone' || act === 'back') { overlay = null; }
+    render();
+    return;
+  }
+  var s = cur();
+  if (act === 'help') { overlay = 'confirm'; }
+  else if (act === 'prev') { if (s.kind === 'menu' && s.page > 0) { s.page = s.page - 1; } }
+  else if (act === 'next') { if (s.kind === 'menu' && s.page < NODES[s.node].pages.length - 1) { s.page = s.page + 1; } }
+  else if (act === 'back' || act === 'no') { if (hist.length > 1) { hist.pop(); } }   // vuelve a la pantalla y página exactas
+  else if (act === 'home') { hist = [{ kind: 'menu', node: 'home', page: 0 }]; }
+  else if (act === 'yes') { hist.push(Object.assign({}, s, { kind: 'sent' })); }
+  else if (act === 'open') { openItem(s, i); }
+  render();
+}
+
+app.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-act]');
+  if (!b || b.disabled) { return; }
+  dispatch(b.getAttribute('data-act'), parseInt(b.getAttribute('data-i'), 10));
+});
+
+render();
+</script>
+</body>
+</html>
